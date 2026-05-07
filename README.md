@@ -1,5 +1,6 @@
 # Servidor de Correo - imad.local
 
+**Imad Chakkour — 2º ASIR — IES Iliberis — 2025/2026**
 
 ---
 
@@ -18,7 +19,7 @@ El MTA, el que envía y recibe correos entre servidores. Lo primero que hay que 
 sudo apt install postfix -y
 ```
 
-Al instalarlo pide el tipo de configuración, hay que elegir "Sitio de Internet" y poner tu dominio en mi caso `imad.local`. Lo más importante que he tocado en `main.cf` es el formato de buzón:
+Al instalarlo pide el tipo de configuración, hay que elegir "Sitio de Internet" y poner tu dominio, en mi caso `imad.local`. Lo más importante que he tocado en `main.cf` es el formato de buzón:
 
 ```
 home_mailbox = Maildir/
@@ -55,6 +56,16 @@ El flujo queda así:
 Postfix (25) → Amavis (10024) → ClamAV + SpamAssassin → Postfix (10025) → buzón
 ```
 
+Aquí se puede ver cómo Amavis procesa los correos y los marca como limpios:
+
+![Amavis procesando correos](evidencias/Amavis.PNG)
+
+### Puertos activos
+
+Todos los servicios escuchando correctamente:
+
+![Puertos activos](evidencias/Puertos.PNG)
+
 ### TLS/SSL
 He creado una CA propia y con ella he firmado el certificado del servidor. No he usado el certificado autofirmado que viene por defecto (snakeoil) porque no es correcto usarlo.
 
@@ -82,6 +93,8 @@ sudo apt install roundcube roundcube-mysql -y
 
 Acceso: `http://192.168.75.177/roundcube`
 
+![Roundcube funcionando](evidencias/Roundcube.PNG)
+
 ### Thunderbird
 Cliente de escritorio. Lo he configurado con IMAP en el puerto 143 y SMTP en el puerto 25.
 
@@ -90,7 +103,9 @@ sudo apt install thunderbird -y
 ```
 
 ### PGP
-La firma digital y el cifrado se configura en Thunderbird, no en el servidor. Cada usuario genera sus claves desde `Configuración de cuenta → Cifrado de extremo a extremo`.
+La firma digital y el cifrado se configura en Thunderbird, no en el servidor. Cada usuario genera sus claves desde `Configuración de cuenta → Cifrado de extremo a extremo`. Para firmar y cifrar un correo al redactarlo vas a `Security → Digitally Sign` y `Encrypt`.
+
+![Thunderbird con correos](evidencias/Thunderbird.PNG)
 
 ### Fetchmail
 Recoge correos de cuentas externas. Lo he configurado con mi Gmail personal.
