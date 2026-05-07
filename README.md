@@ -6,7 +6,13 @@
 
 ## ¿De qué va esto?
 
-He montado un servidor de correo completo en una Debian 13 desde cero. El dominio es `imad.local` y la IP del servidor es `192.168.75.177`. Aquí explico todo lo que he instalado y cómo lo he configurado.
+He montado un servidor de correo completo en una Debian 13 desde cero dentro de GNS3. El dominio es `imad.local`, el servidor se llama `mail.imad.local` y tiene la IP `192.168.220.12` en la red de GNS3. Aquí explico todo lo que he instalado y cómo lo he configurado.
+
+---
+
+## Topología en GNS3
+
+El servidor de correo está conectado a la red `192.168.220.0/24` junto con el servidor DHCP. El servidor DNS está en la red `192.168.221.0/24` con la IP `192.168.221.10`.
 
 ---
 
@@ -67,22 +73,7 @@ Todos los servicios escuchando correctamente:
 ![Puertos activos](evidencias/Puertos.PNG)
 
 ### TLS/SSL
-He creado una CA propia y con ella he firmado el certificado del servidor. No he usado el certificado autofirmado que viene por defecto (snakeoil) porque no es correcto usarlo.
-
-```bash
-sudo mkdir -p /etc/ssl/CA
-sudo openssl genrsa -out /etc/ssl/CA/ca.key 4096
-sudo openssl req -new -x509 -days 3650 -key /etc/ssl/CA/ca.key -out /etc/ssl/CA/ca.crt \
-  -subj "/C=ES/ST=Andalucia/L=Granada/O=IES Iliberis/OU=CA/CN=CA imad.local"
-sudo openssl genrsa -out /etc/ssl/private/mail.imad.local.key 4096
-sudo openssl req -new -key /etc/ssl/private/mail.imad.local.key \
-  -out /etc/ssl/CA/mail.imad.local.csr \
-  -subj "/C=ES/ST=Andalucia/L=Granada/O=IES Iliberis/OU=Correo/CN=mail.imad.local"
-sudo openssl x509 -req -days 1095 \
-  -in /etc/ssl/CA/mail.imad.local.csr \
-  -CA /etc/ssl/CA/ca.crt -CAkey /etc/ssl/CA/ca.key -CAcreateserial \
-  -out /etc/ssl/certs/mail.imad.local.crt
-```
+He creado una CA propia y con ella he firmado el certificado del servidor. No he usado el certificado autofirmado que viene por defecto (snakeoil) porque buscando informacion, he visto que no es correcto usarlo.
 
 ### Roundcube
 Cliente web de correo, se accede desde el navegador. Necesita Apache, PHP y MariaDB.
@@ -91,7 +82,7 @@ Cliente web de correo, se accede desde el navegador. Necesita Apache, PHP y Mari
 sudo apt install roundcube roundcube-mysql -y
 ```
 
-Acceso: `http://192.168.75.177/roundcube`
+Acceso: `http://192.168.220.12/roundcube`
 
 ![Roundcube funcionando](evidencias/Roundcube.PNG)
 
@@ -102,10 +93,12 @@ Cliente de escritorio. Lo he configurado con IMAP en el puerto 143 y SMTP en el 
 sudo apt install thunderbird -y
 ```
 
+![Thunderbird con correos](evidencias/Thunderbird.PNG)
+
 ### PGP
 La firma digital y el cifrado se configura en Thunderbird, no en el servidor. Cada usuario genera sus claves desde `Configuración de cuenta → Cifrado de extremo a extremo`. Para firmar y cifrar un correo al redactarlo vas a `Security → Digitally Sign` y `Encrypt`.
 
-![Thunderbird con correos](evidencias/Thunderbird.PNG)
+**Problema que tuve:** Para que el cifrado funcione los dos usuarios tienen que intercambiar sus claves públicas primero. La forma más fácil es que cada uno mande un correo firmado al otro, así Thunderbird importa la clave automáticamente.
 
 ### Fetchmail
 Recoge correos de cuentas externas. Lo he configurado con mi Gmail personal.
@@ -114,18 +107,77 @@ Recoge correos de cuentas externas. Lo he configurado con mi Gmail personal.
 sudo apt install fetchmail -y
 ```
 
-Configuración en `/root/.fetchmailrc`:
-```
-poll pop.gmail.com
-    proto POP3
-    port 995
-    user "imadhyt0@gmail.com"
-    password "contraseña_aplicacion"
-    ssl
-    mda "/usr/sbin/sendmail -i imad@imad.local"
-    fetchlimit 5
-```
-
 **Problema que tuve:** La primera vez no puse `fetchlimit` y con 324 mensajes en el Gmail me congeló la máquina entera y tuve que reiniciar.
 
+### DNS
+Para que el servidor de correo funcione correctamente en GNS3 he añadido estos registros en el servidor DNS (Bind9 en `192.168.221.10`):
+
+En `/var/lib/bind/db.imad.local` he añadido:
+```
+; Registro MX - dice que el correo de imad.local lo gestiona mail.imad.local
+@        MX   10 mail.imad.local.
+
+; Registro A - dice que mail.imad.local tiene la IP 192.168.220.12
+mail     A    192.168.220.12
+```
+
+Para verificar que el DNS resuelve correctamente:
+```bash
+nslookup mail.imad.local 192.168.221.10
+nslookup -type=MX imad.local 192.168.221.10
+```
+
+**Problema que tuve:** Al editar el archivo de zona a mano con nano, el archivo `.jnl` que usa Bind9 para las actualizaciones dinámicas se desincronizó y daba SERVFAIL. Lo arreglé borrando el archivo journal y reiniciando el servicio.
+
+### Monitorización (Prometheus + Grafana)
+He instalado node_exporter en el servidor de correo para que Prometheus pueda recoger métricas.
+
+```bash
+sudo apt install prometheus-node-exporter -y
+sudo systemctl enable prometheus-node-exporter
+sudo systemctl start prometheus-node-exporter
+```
+
+Luego he añadido el servidor de correo en la configuración de Prometheus en `/etc/prometheus/prometheus.yml`:
+
+
+En Grafana he creado un dashboard con paneles de CPU, RAM, disco y uptime del servidor de correo.
+
+![Grafana dashboard](evidencias/Monitorizacion.PNG)
+
 ---
+
+## Archivos de configuración
+
+Todos los archivos están en el repositorio:
+
+| Archivo | Descripción |
+|---|---|
+| `main.cf` | Configuración principal de Postfix |
+| `master.cf` | Servicios y puertos de Postfix |
+| `dovecot.conf` | Configuración principal de Dovecot |
+| `10-mail.conf` | Formato de buzones |
+| `10-auth.conf` | Autenticación |
+| `10-master.conf` | Servicios y puertos Dovecot |
+| `10-ssl.conf` | Certificados SSL |
+| `config.inc.php` | Configuración Roundcube |
+
+---
+
+## Puertos activos
+
+| Puerto | Servicio |
+|---|---|
+| 25 | Postfix SMTP |
+| 587 | Postfix Submission |
+| 143 | Dovecot IMAP |
+| 993 | Dovecot IMAPS |
+| 110 | Dovecot POP3 |
+| 995 | Dovecot POP3S |
+| 10024 | Amavis entrada |
+| 10025 | Amavis salida |
+| 9100 | Node Exporter (Prometheus) |
+
+## Vídeo demostración
+
+[Ver vídeo de demostración - Servidor de Correo](https://drive.google.com/file/d/1-0TNWc4CbYQYQ4bcMSUlH0zQP0fo8EJV/view?usp=sharing)
